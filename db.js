@@ -1,7 +1,7 @@
 // ==============================================================
-// MYSQL DATABASE CONNECTOR & ORM
+// MYSQL DATABASE CONNECTOR & ORM (MULTI-DATABASE: HARDWARE & CASING)
 // Mendukung MySQL 5.7+, 8.0+, MariaDB 10.3+
-// Otomatis migrate table, auto-seed data jika kosong, & auto-fallback
+// Otomatis membuat database, migrate table, auto-seed data, & auto-fallback
 // ==============================================================
 
 const fs = require('fs');
@@ -26,121 +26,175 @@ function getDbConfig() {
     }
   }
 
-  return {
+  const baseConfig = {
     host: process.env.DB_HOST || fileConfig.host || 'localhost',
     user: process.env.DB_USER || fileConfig.user || 'root',
     password: process.env.DB_PASSWORD !== undefined ? process.env.DB_PASSWORD : (fileConfig.password !== undefined ? fileConfig.password : ''),
-    database: process.env.DB_NAME || fileConfig.database || 'laporan_service_db',
     port: parseInt(process.env.DB_PORT || fileConfig.port || 3306, 10),
     waitForConnections: true,
     connectionLimit: 10,
     queueLimit: 0,
     charset: 'utf8mb4'
   };
+
+  const databases = {
+    hardware: process.env.DB_NAME_HARDWARE || (fileConfig.databases && fileConfig.databases.hardware) || 'laporan_service_hardware',
+    casing: process.env.DB_NAME_CASING || (fileConfig.databases && fileConfig.databases.casing) || 'laporan_service_casing'
+  };
+
+  return {
+    ...baseConfig,
+    databases
+  };
 }
 
-let pool = null;
-let isConnected = false;
+const pools = {};
+const connectionStatus = {
+  hardware: false,
+  casing: false
+};
 
-// Inisialisasi pool dan database
-async function initDatabase(initialJsonData = null) {
+// Inisialisasi pool dan database untuk masing-masing bagian (hardware & casing)
+async function initDatabase(initialDataMap = {}) {
   if (!mysql) return false;
 
   const config = getDbConfig();
+  const dbKeys = ['hardware', 'casing'];
 
-  // 1. Coba koneksi ke server MySQL
+  // 1. Coba koneksi ke server MySQL tanpa memilih database terlebih dahulu
+  let tempConn = null;
   try {
-    // Buat database jika belum ada
-    const tempConn = await mysql.createConnection({
+    tempConn = await mysql.createConnection({
       host: config.host,
       user: config.user,
       password: config.password,
       port: config.port
     });
 
-    await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${config.database}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
-    await tempConn.end();
-
-    // Buat pool utama dengan database terpilih
-    pool = mysql.createPool(config);
-
-    // 2. Buat tabel-tabel jika belum ada
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS \`users\` (
-        \`id\` BIGINT NOT NULL,
-        \`username\` VARCHAR(100) NOT NULL UNIQUE,
-        \`password\` VARCHAR(255) NOT NULL,
-        \`nama\` VARCHAR(255) NOT NULL,
-        \`role\` VARCHAR(100) NOT NULL DEFAULT 'Admin',
-        \`avatar\` LONGTEXT NULL,
-        \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        \`updatedAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS \`jenis_alat\` (
-        \`id\` BIGINT NOT NULL,
-        \`nama\` VARCHAR(255) NOT NULL,
-        \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS \`kategori_lokasi\` (
-        \`id\` BIGINT NOT NULL,
-        \`nama\` VARCHAR(255) NOT NULL,
-        \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    await pool.query(`
-      CREATE TABLE IF NOT EXISTS \`laporan\` (
-        \`id\` BIGINT NOT NULL,
-        \`no\` VARCHAR(50) DEFAULT '',
-        \`tanggalMasuk\` VARCHAR(50) DEFAULT '',
-        \`tanggalKeluar\` VARCHAR(50) DEFAULT '',
-        \`jumlahAlat\` INT DEFAULT 1,
-        \`keteranganPerbaikan\` TEXT,
-        \`jenisAlatId\` BIGINT DEFAULT NULL,
-        \`jenisAlatNama\` VARCHAR(255) DEFAULT '',
-        \`lokasiDari\` VARCHAR(255) DEFAULT '',
-        \`kondisi\` VARCHAR(50) DEFAULT 'Lama',
-        \`lamaHari\` INT DEFAULT 0,
-        \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        \`updatedAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        PRIMARY KEY (\`id\`),
-        INDEX \`idx_tgl_masuk\` (\`tanggalMasuk\`),
-        INDEX \`idx_lokasi\` (\`lokasiDari\`),
-        INDEX \`idx_jenis\` (\`jenisAlatNama\`)
-      ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-    `);
-
-    // 3. Cek apakah tabel kosong, jika ya migrasikan data awal dari JSON
-    const [userRows] = await pool.query('SELECT COUNT(*) as cnt FROM users');
-    if (userRows[0].cnt === 0 && initialJsonData) {
-      console.log('📦 Memigrasikan data awal dari JSON ke database MySQL...');
-      await saveDataToDb(initialJsonData);
-      console.log('✓ Migrasi data awal ke MySQL berhasil!');
+    // Buat masing-masing database jika belum ada
+    for (const key of dbKeys) {
+      const dbName = config.databases[key];
+      await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
     }
-
-    isConnected = true;
-    console.log(`✓ Terhubung ke database MySQL: [${config.database}] di ${config.host}:${config.port}`);
-    return true;
+    await tempConn.end();
+    tempConn = null;
   } catch (err) {
     console.warn(`⚠️ Gagal menghubungkan ke MySQL (${err.message}). Menggunakan penyimpanan file JSON.`);
-    isConnected = false;
-    pool = null;
+    if (tempConn) {
+      try { await tempConn.end(); } catch (e) {}
+    }
+    connectionStatus.hardware = false;
+    connectionStatus.casing = false;
     return false;
   }
+
+  // 2. Inisialisasi pool & tabel untuk setiap database (hardware & casing)
+  for (const key of dbKeys) {
+    const dbName = config.databases[key];
+    try {
+      const pool = mysql.createPool({
+        host: config.host,
+        user: config.user,
+        password: config.password,
+        port: config.port,
+        database: dbName,
+        waitForConnections: true,
+        connectionLimit: 10,
+        queueLimit: 0,
+        charset: 'utf8mb4'
+      });
+
+      // Buat tabel users
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`users\` (
+          \`id\` BIGINT NOT NULL,
+          \`username\` VARCHAR(100) NOT NULL UNIQUE,
+          \`password\` VARCHAR(255) NOT NULL,
+          \`nama\` VARCHAR(255) NOT NULL,
+          \`role\` VARCHAR(100) NOT NULL DEFAULT 'Admin',
+          \`avatar\` LONGTEXT NULL,
+          \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          \`updatedAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // Buat tabel jenis_alat
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`jenis_alat\` (
+          \`id\` BIGINT NOT NULL,
+          \`nama\` VARCHAR(255) NOT NULL,
+          \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // Buat tabel kategori_lokasi
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`kategori_lokasi\` (
+          \`id\` BIGINT NOT NULL,
+          \`nama\` VARCHAR(255) NOT NULL,
+          \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      // Buat tabel laporan
+      await pool.query(`
+        CREATE TABLE IF NOT EXISTS \`laporan\` (
+          \`id\` BIGINT NOT NULL,
+          \`no\` VARCHAR(50) DEFAULT '',
+          \`tanggalMasuk\` VARCHAR(50) DEFAULT '',
+          \`tanggalKeluar\` VARCHAR(50) DEFAULT '',
+          \`jumlahAlat\` INT DEFAULT 1,
+          \`keteranganPerbaikan\` TEXT,
+          \`jenisAlatId\` BIGINT DEFAULT NULL,
+          \`jenisAlatNama\` VARCHAR(255) DEFAULT '',
+          \`lokasiDari\` VARCHAR(255) DEFAULT '',
+          \`kondisi\` VARCHAR(50) DEFAULT 'Lama',
+          \`lamaHari\` INT DEFAULT 0,
+          \`createdAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+          \`updatedAt\` TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+          PRIMARY KEY (\`id\`),
+          INDEX \`idx_tgl_masuk\` (\`tanggalMasuk\`),
+          INDEX \`idx_lokasi\` (\`lokasiDari\`),
+          INDEX \`idx_jenis\` (\`jenisAlatNama\`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+      `);
+
+      pools[key] = pool;
+      connectionStatus[key] = true;
+
+      // 3. Cek apakah tabel users kosong, jika ya migrasikan data awal
+      const [userRows] = await pool.query('SELECT COUNT(*) as cnt FROM users');
+      const targetInitial = initialDataMap[key] || initialDataMap['default'];
+      if (userRows[0].cnt === 0 && targetInitial) {
+        console.log(`📦 Memigrasikan data awal dari JSON ke database MySQL [${dbName}]...`);
+        await saveDataToDb(targetInitial, key);
+        console.log(`✓ Migrasi awal ke database [${dbName}] berhasil!`);
+      }
+
+      console.log(`✓ Terhubung ke database MySQL: [${dbName}] (${key}) di ${config.host}:${config.port}`);
+    } catch (err) {
+      console.warn(`⚠️ Gagal menginisialisasi database [${dbName}]: ${err.message}`);
+      connectionStatus[key] = false;
+      pools[key] = null;
+    }
+  }
+
+  return connectionStatus.hardware || connectionStatus.casing;
 }
 
-// Ambil seluruh data dari MySQL
-async function getDataFromDb() {
-  if (!isConnected || !pool) return null;
+// Normalisasi target database key ('hardware' atau 'casing')
+function normalizeDbKey(key) {
+  return String(key || '').toLowerCase() === 'casing' ? 'casing' : 'hardware';
+}
+
+// Ambil seluruh data dari MySQL berdasarkan target database
+async function getDataFromDb(targetDb = 'hardware') {
+  const key = normalizeDbKey(targetDb);
+  const pool = pools[key];
+  if (!connectionStatus[key] || !pool) return null;
 
   try {
     const [users] = await pool.query('SELECT id, username, password, nama, role, avatar FROM users ORDER BY id ASC');
@@ -155,14 +209,16 @@ async function getDataFromDb() {
       laporan: laporan || []
     };
   } catch (err) {
-    console.error('Error saat mengambil data dari MySQL:', err.message);
+    console.error(`Error saat mengambil data dari MySQL [${key}]:`, err.message);
     return null;
   }
 }
 
-// Simpan data ke MySQL menggunakan transaksi
-async function saveDataToDb(data) {
-  if (!isConnected || !pool) return false;
+// Simpan data ke MySQL menggunakan transaksi berdasarkan target database
+async function saveDataToDb(data, targetDb = 'hardware') {
+  const key = normalizeDbKey(targetDb);
+  const pool = pools[key];
+  if (!connectionStatus[key] || !pool) return false;
 
   const conn = await pool.getConnection();
   try {
@@ -248,21 +304,41 @@ async function saveDataToDb(data) {
     return true;
   } catch (err) {
     await conn.rollback();
-    console.error('Error saat menyimpan ke MySQL:', err.message);
+    console.error(`Error saat menyimpan ke MySQL [${key}]:`, err.message);
     return false;
   } finally {
     conn.release();
   }
 }
 
-function getDatabaseStatus() {
+function getDatabaseStatus(targetDb = null) {
   const config = getDbConfig();
+  if (targetDb) {
+    const key = normalizeDbKey(targetDb);
+    return {
+      target: key,
+      engine: connectionStatus[key] ? 'mysql' : 'json',
+      connected: !!connectionStatus[key],
+      host: config.host,
+      port: config.port,
+      database: config.databases[key]
+    };
+  }
+
+  const anyConnected = connectionStatus.hardware || connectionStatus.casing;
   return {
-    engine: isConnected ? 'mysql' : 'json',
-    connected: isConnected,
+    engine: anyConnected ? 'mysql' : 'json',
+    connected: anyConnected,
     host: config.host,
     port: config.port,
-    database: config.database
+    hardware: {
+      connected: !!connectionStatus.hardware,
+      database: config.databases.hardware
+    },
+    casing: {
+      connected: !!connectionStatus.casing,
+      database: config.databases.casing
+    }
   };
 }
 

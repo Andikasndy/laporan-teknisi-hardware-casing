@@ -7,23 +7,19 @@
 
 ---
 
-## 1. Setup Database MySQL
+## 1. Setup Database MySQL (Terpisah: Hardware & Casing)
 
-### Di XAMPP / MySQL Lokal
-```sql
-CREATE DATABASE laporan_service_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-```
-Kemudian jalankan file `database.sql` untuk membuat tabel:
+Aplikasi ini menggunakan 2 database terpisah untuk Teknisi Hardware dan Teknisi Casing:
+- `laporan_service_hardware`: Menyimpan data khusus perbaikan Hardware
+- `laporan_service_casing`: Menyimpan data khusus perbaikan Casing
+
+### Otomatis
+Database dan tabel akan dibuat secara otomatis oleh server Node.js saat pertama kali dijalankan.
+
+### Manual (Opsional via MySQL CLI / phpMyAdmin)
+Jalankan file `database.sql`:
 ```bash
-mysql -u root laporan_service_db < database.sql
-```
-
-### Di VPS / Server Remote
-```sql
-CREATE USER 'laporan_user'@'%' IDENTIFIED BY 'password_anda';
-CREATE DATABASE laporan_service_db CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
-GRANT ALL PRIVILEGES ON laporan_service_db.* TO 'laporan_user'@'%';
-FLUSH PRIVILEGES;
+mysql -u root < database.sql
 ```
 
 ---
@@ -36,8 +32,11 @@ Edit file `config.json`:
   "host": "localhost",
   "user": "root",
   "password": "",
-  "database": "laporan_service_db",
-  "port": 3306
+  "port": 3306,
+  "databases": {
+    "hardware": "laporan_service_hardware",
+    "casing": "laporan_service_casing"
+  }
 }
 ```
 
@@ -46,8 +45,9 @@ Edit file `config.json`:
 DB_HOST=localhost
 DB_USER=root
 DB_PASSWORD=password_anda
-DB_NAME=laporan_service_db
 DB_PORT=3306
+DB_NAME_HARDWARE=laporan_service_hardware
+DB_NAME_CASING=laporan_service_casing
 PORT=3000
 ```
 

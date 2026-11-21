@@ -20,28 +20,34 @@ function getWebDir() {
 
 const WEB_DIR = getWebDir();
 
-// Tentukan path penyimpanan data JSON lokal (sebagai file backup)
-function getDataFilePath() {
+// Tentukan path penyimpanan data JSON lokal berdasarkan database key
+function getDataFilePath(targetDb = 'hardware') {
   const localDataDir = path.join(__dirname, 'data');
-  const localDataFile = path.join(localDataDir, 'laporan-service.json');
-
-  if (fs.existsSync(localDataFile)) {
-    return localDataFile;
-  }
-
-  const appData = process.env.APPDATA || (process.platform === 'darwin' ? path.join(os.homedir(), 'Library', 'Application Support') : path.join(os.homedir(), '.config'));
-  const electronDataPath = path.join(appData, 'laporan-service-pc', 'laporan-service.json');
-  if (fs.existsSync(electronDataPath)) {
-    return electronDataPath;
-  }
-
   if (!fs.existsSync(localDataDir)) {
     fs.mkdirSync(localDataDir, { recursive: true });
   }
-  return localDataFile;
-}
 
-const DATA_FILE = getDataFilePath();
+  const key = String(targetDb || '').toLowerCase() === 'casing' ? 'casing' : 'hardware';
+  const targetFile = path.join(localDataDir, `laporan-service-${key}.json`);
+
+  // Jika file per-bagian belum ada tapi file legacy ada, jadikan legacy sebagai acuan awal
+  if (!fs.existsSync(targetFile)) {
+    const legacyFile = path.join(localDataDir, 'laporan-service.json');
+    if (fs.existsSync(legacyFile)) {
+      try {
+        const legacyData = JSON.parse(fs.readFileSync(legacyFile, 'utf8'));
+        fs.writeFileSync(targetFile, JSON.stringify({
+          users: legacyData.users || DEFAULT_USERS,
+          jenisAlat: legacyData.jenisAlat || INITIAL_DATA.jenisAlat,
+          kategoriLokasi: legacyData.kategoriLokasi || INITIAL_DATA.kategoriLokasi,
+          laporan: []
+        }, null, 2), 'utf8');
+      } catch (e) {}
+    }
+  }
+
+  return targetFile;
+}
 
 // Data default jika file/db belum ada
 const DEFAULT_USERS = [
@@ -84,11 +90,12 @@ const INITIAL_DATA = {
   laporan: []
 };
 
-// Baca data JSON lokal
-function readJsonData() {
+// Baca data JSON lokal berdasarkan bagian ('hardware' atau 'casing')
+function readJsonData(targetDb = 'hardware') {
+  const filePath = getDataFilePath(targetDb);
   try {
-    if (fs.existsSync(DATA_FILE)) {
-      const content = fs.readFileSync(DATA_FILE, 'utf-8');
+    if (fs.existsSync(filePath)) {
+      const content = fs.readFileSync(filePath, 'utf-8');
       const parsed = JSON.parse(content);
       return {
         users: Array.isArray(parsed.users) && parsed.users.length > 0 ? parsed.users : DEFAULT_USERS,
@@ -98,22 +105,23 @@ function readJsonData() {
       };
     }
   } catch (err) {
-    console.error('Gagal membaca file data JSON:', err);
+    console.error(`Gagal membaca file data JSON [${targetDb}]:`, err.message);
   }
   return INITIAL_DATA;
 }
 
-// Simpan data JSON lokal
-function writeJsonData(newData) {
+// Simpan data JSON lokal berdasarkan bagian ('hardware' atau 'casing')
+function writeJsonData(newData, targetDb = 'hardware') {
+  const filePath = getDataFilePath(targetDb);
   try {
-    const dir = path.dirname(DATA_FILE);
+    const dir = path.dirname(filePath);
     if (!fs.existsSync(dir)) {
       fs.mkdirSync(dir, { recursive: true });
     }
-    fs.writeFileSync(DATA_FILE, JSON.stringify(newData, null, 2), 'utf-8');
+    fs.writeFileSync(filePath, JSON.stringify(newData, null, 2), 'utf-8');
     return true;
   } catch (err) {
-    console.error('Gagal menyimpan file data JSON:', err);
+    console.error(`Gagal menyimpan file data JSON [${targetDb}]:`, err.message);
     return false;
   }
 }
@@ -151,7 +159,7 @@ const server = http.createServer(async (req, res) => {
   try {
     res.setHeader('Access-Control-Allow-Origin', '*');
     res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Database');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -162,22 +170,30 @@ const server = http.createServer(async (req, res) => {
     const parsedUrl = url.parse(req.url, true);
     const pathname = parsedUrl.pathname;
 
+    // Normalisasi database tujuan dari query param ?db=casing / ?db=hardware atau header
+    const requestedDb = (parsedUrl.query.db || req.headers['x-database'] || 'hardware').toLowerCase() === 'casing' ? 'casing' : 'hardware';
+
     // --- API: GET DATA ---
     if (pathname === '/api/data' && req.method === 'GET') {
       let result = null;
-      const dbStatus = db.getDatabaseStatus();
+      const dbStatus = db.getDatabaseStatus(requestedDb);
 
       if (dbStatus.connected) {
-        result = await db.getDataFromDb();
+        result = await db.getDataFromDb(requestedDb);
       }
 
       if (!result) {
-        result = readJsonData();
+        result = readJsonData(requestedDb);
       }
+
+      result.activeDatabase = requestedDb;
+      result.databaseName = dbStatus.database || path.basename(getDataFilePath(requestedDb));
 
       res.writeHead(200, {
         'Content-Type': 'application/json; charset=utf-8',
-        'X-Database-Engine': dbStatus.engine
+        'X-Database-Engine': dbStatus.engine,
+        'X-Database-Target': requestedDb,
+        'X-Database-Name': result.databaseName
       });
       res.end(JSON.stringify(result));
       return;
@@ -195,20 +211,23 @@ const server = http.createServer(async (req, res) => {
       req.on('end', async () => {
         try {
           const parsed = JSON.parse(body);
+          const targetDb = (parsedUrl.query.db || parsed.db || req.headers['x-database'] || 'hardware').toLowerCase() === 'casing' ? 'casing' : 'hardware';
           
-          // 1. Simpan ke file JSON sebagai cadangan
-          writeJsonData(parsed);
+          // 1. Simpan ke file JSON cadangan khusus bagian tersebut
+          writeJsonData(parsed, targetDb);
 
           // 2. Simpan ke database MySQL jika terhubung
-          const dbStatus = db.getDatabaseStatus();
+          const dbStatus = db.getDatabaseStatus(targetDb);
           let dbSuccess = true;
           if (dbStatus.connected) {
-            dbSuccess = await db.saveDataToDb(parsed);
+            dbSuccess = await db.saveDataToDb(parsed, targetDb);
           }
 
           res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
           res.end(JSON.stringify({
             success: true,
+            database: targetDb,
+            databaseName: dbStatus.database,
             engine: dbStatus.engine,
             dbSaved: dbSuccess
           }));
@@ -222,11 +241,18 @@ const server = http.createServer(async (req, res) => {
 
     // --- API: INFO SERVER ---
     if (pathname === '/api/info' && req.method === 'GET') {
+      const dbOverall = db.getDatabaseStatus();
       res.writeHead(200, { 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({
         status: 'online',
-        database: db.getDatabaseStatus(),
-        backupJsonFile: DATA_FILE,
+        databases: {
+          hardware: db.getDatabaseStatus('hardware'),
+          casing: db.getDatabaseStatus('casing')
+        },
+        backupFiles: {
+          hardware: getDataFilePath('hardware'),
+          casing: getDataFilePath('casing')
+        },
         localIps: getLocalIPAddresses()
       }));
       return;
@@ -282,13 +308,21 @@ process.on('uncaughtException', (err) => {
 });
 
 async function startServer() {
-  // Inisialisasi MySQL
-  const initialData = readJsonData();
-  await db.initDatabase(initialData);
+  // Inisialisasi data awal untuk Hardware dan Casing
+  const initialHw = readJsonData('hardware');
+  const initialCs = readJsonData('casing');
+
+  await db.initDatabase({
+    hardware: initialHw,
+    casing: initialCs,
+    default: initialHw
+  });
 
   server.listen(DEFAULT_PORT, '0.0.0.0', () => {
     const ips = getLocalIPAddresses();
-    const dbStatus = db.getDatabaseStatus();
+    const statusHw = db.getDatabaseStatus('hardware');
+    const statusCs = db.getDatabaseStatus('casing');
+
     console.log('\n=============================================================');
     console.log('  🌐 Laporan Service Web Server Berhasil Dijalankan!');
     console.log('=============================================================');
@@ -297,8 +331,10 @@ async function startServer() {
       console.log(`  ▶ Akses dari HP/PC lain (${item.name}): http://${item.ip}:${DEFAULT_PORT}`);
     });
     console.log('-------------------------------------------------------------');
-    console.log(`  🗄️ Database Utama         : ${dbStatus.connected ? `MySQL [${dbStatus.database}] di ${dbStatus.host}` : 'File JSON (Offline)'}`);
-    console.log(`  📁 File Backup Cadangan   : ${DATA_FILE}`);
+    console.log(`  🗄️ Database Hardware      : ${statusHw.connected ? `MySQL [${statusHw.database}]` : 'File JSON (Hardware)'}`);
+    console.log(`  🗄️ Database Casing        : ${statusCs.connected ? `MySQL [${statusCs.database}]` : 'File JSON (Casing)'}`);
+    console.log(`  📁 File Backup Hardware   : ${getDataFilePath('hardware')}`);
+    console.log(`  📁 File Backup Casing     : ${getDataFilePath('casing')}`);
     console.log('=============================================================\n');
   });
 }

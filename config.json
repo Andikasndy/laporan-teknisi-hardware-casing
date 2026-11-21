@@ -2,6 +2,9 @@
   "host": "localhost",
   "user": "root",
   "password": "",
-  "database": "laporan_service_db",
-  "port": 3306
+  "port": 3306,
+  "databases": {
+    "hardware": "laporan_service_hardware",
+    "casing": "laporan_service_casing"
+  }
 }

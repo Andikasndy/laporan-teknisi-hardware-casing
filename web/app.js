@@ -44,6 +44,7 @@ const INITIAL_DATA = {
 };
 
 let data = { ...INITIAL_DATA };
+let currentDb = localStorage.getItem('active_database') || 'hardware';
 let currentUser = null;
 let editingLaporanId = null;
 let editingJenisAlatId = null;
@@ -51,6 +52,48 @@ let editingLokasiId = null;
 let dayCheckInterval = null;
 let isSavingLaporan = false;
 let pendingAvatarData = null;
+
+function updateDatabaseSwitcherUI() {
+  const selector = document.getElementById('dbSelector');
+  if (selector) selector.value = currentDb;
+
+  const loginDbSel = document.getElementById('loginDatabase');
+  if (loginDbSel) loginDbSel.value = currentDb;
+
+  const dbBadge = document.getElementById('dbStatusBadge');
+  if (dbBadge) {
+    const isHardware = currentDb === 'hardware';
+    dbBadge.innerHTML = `🗄️ Database: <b style="color: ${isHardware ? '#1d4ed8' : '#059669'};">${isHardware ? 'Hardware' : 'Casing'}</b>`;
+    dbBadge.style.background = isHardware ? '#eff6ff' : '#ecfdf5';
+    dbBadge.style.borderColor = isHardware ? '#bfdbfe' : '#a7f3d0';
+    dbBadge.style.color = isHardware ? '#1e40af' : '#065f46';
+  }
+
+  const titleHeader = document.querySelector('.dashboard-title');
+  if (titleHeader) {
+    const isHardware = currentDb === 'hardware';
+    titleHeader.innerHTML = `Dashboard Laporan Service <span style="font-size: 14px; font-weight: 600; padding: 2px 10px; border-radius: 9999px; background: ${isHardware ? '#dbeafe' : '#d1fae5'}; color: ${isHardware ? '#1e40af' : '#065f46'}; vertical-align: middle;">Bagian ${isHardware ? 'Hardware' : 'Casing'}</span>`;
+  }
+}
+
+function handleLoginDatabaseChange(val) {
+  currentDb = val === 'casing' ? 'casing' : 'hardware';
+  try { localStorage.setItem('active_database', currentDb); } catch (e) {}
+  const unameInput = document.getElementById('loginUsername');
+  if (unameInput && (!unameInput.value || unameInput.value === 'hardware' || unameInput.value === 'casing')) {
+    unameInput.value = currentDb;
+  }
+}
+
+async function switchDatabase(targetDb) {
+  const key = targetDb === 'casing' ? 'casing' : 'hardware';
+  if (key === currentDb && data.laporan) return;
+  currentDb = key;
+  try { localStorage.setItem('active_database', currentDb); } catch (e) {}
+  showToast(`🔄 Beralih ke Database Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'}...`, 'info');
+  await loadData(currentDb);
+  showToast(`✓ Aktif di Database: Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'}`, 'success');
+}
 
 // Filter state
 let filterStatus = 'semua';
@@ -192,6 +235,7 @@ function showAppScreen() {
   if (appScreen) appScreen.style.display = 'block';
 
   updateSidebarProfile();
+  updateDatabaseSwitcherUI();
   showTab('dashboard');
   renderDashboard();
 }
@@ -218,12 +262,29 @@ function handleLoginSubmit(event) {
       role: matchedUser.role || 'Teknisi Service',
       avatar: matchedUser.avatar || ''
     };
+
+    // Tentukan database aktif berdasarkan username login atau pilihan database
+    if (matchedUser.username.toLowerCase() === 'casing') {
+      currentDb = 'casing';
+    } else if (matchedUser.username.toLowerCase() === 'hardware') {
+      currentDb = 'hardware';
+    } else {
+      const loginDbEl = document.getElementById('loginDatabase');
+      if (loginDbEl && loginDbEl.value) {
+        currentDb = loginDbEl.value;
+      }
+    }
+    localStorage.setItem('active_database', currentDb);
     localStorage.setItem('auth_user', JSON.stringify(currentUser));
     localStorage.setItem('auth_login_date', getTodayDateString());
     if (errEl) errEl.style.display = 'none';
-    showAppScreen();
-    startDayChangeWatcher();
-    showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}!`, 'success');
+
+    // Muat data khusus database bagian tersebut
+    loadData(currentDb).then(() => {
+      showAppScreen();
+      startDayChangeWatcher();
+      showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Database: ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
+    });
   } else {
     if (errEl) {
       errEl.textContent = 'Username atau Password salah! Periksa kembali.';
@@ -330,13 +391,18 @@ function updateSaveStatus(status) {
 // ==========================================
 // PERSISTENSI DATA (SERVER REST API + LOCALSTORAGE FALLBACK)
 // ==========================================
-async function loadData() {
+async function loadData(targetDb = null) {
+  if (targetDb) {
+    currentDb = targetDb === 'casing' ? 'casing' : 'hardware';
+    try { localStorage.setItem('active_database', currentDb); } catch (e) {}
+  }
   updateSaveStatus('saving');
+  updateDatabaseSwitcherUI();
   let loadedSuccessfully = false;
 
-  // 1. Coba fetch dari server backend Node.js
+  // 1. Coba fetch dari server backend Node.js untuk database aktif
   try {
-    const res = await fetch('/api/data', { cache: 'no-store' });
+    const res = await fetch(`/api/data?db=${currentDb}`, { cache: 'no-store' });
     if (res.ok) {
       const serverData = await res.json();
       if (serverData && typeof serverData === 'object') {
@@ -349,19 +415,19 @@ async function loadData() {
           kategoriLokasi,
           laporan: Array.isArray(serverData.laporan) ? serverData.laporan : []
         };
-        // Simpan ke localStorage sebagai offline backup
-        try { localStorage.setItem('laporan_service_web_backup', JSON.stringify(data)); } catch (e) {}
+        // Simpan ke localStorage sebagai offline backup khusus database ini
+        try { localStorage.setItem(`laporan_service_web_backup_${currentDb}`, JSON.stringify(data)); } catch (e) {}
         loadedSuccessfully = true;
       }
     }
   } catch (err) {
-    console.warn('Backend API tidak merespons, memuat dari localStorage offline...', err);
+    console.warn(`Backend API tidak merespons untuk [${currentDb}], memuat dari localStorage offline...`, err);
   }
 
-  // 2. Jika server tidak tersedia, muat dari localStorage offline
+  // 2. Jika server tidak tersedia, muat dari localStorage offline khusus database ini
   if (!loadedSuccessfully) {
     try {
-      const offline = localStorage.getItem('laporan_service_web_backup');
+      const offline = localStorage.getItem(`laporan_service_web_backup_${currentDb}`);
       if (offline) {
         const parsed = JSON.parse(offline);
         data = {
@@ -371,10 +437,10 @@ async function loadData() {
           laporan: Array.isArray(parsed.laporan) ? parsed.laporan : []
         };
       } else {
-        data = { ...INITIAL_DATA };
+        data = { ...INITIAL_DATA, laporan: [] };
       }
     } catch (e) {
-      data = { ...INITIAL_DATA };
+      data = { ...INITIAL_DATA, laporan: [] };
     }
   }
 
@@ -383,6 +449,7 @@ async function loadData() {
   renderAll();
   checkAuth();
   checkServerInfo();
+  updateDatabaseSwitcherUI();
 }
 
 async function checkServerInfo() {
@@ -391,52 +458,64 @@ async function checkServerInfo() {
     const res = await fetch('/api/info', { cache: 'no-store' });
     if (res.ok) {
       const info = await res.json();
-      if (dbBadge && info && info.database) {
-        if (info.database.connected && info.database.engine === 'mysql') {
+      if (dbBadge && info && info.databases) {
+        const activeDbInfo = info.databases[currentDb];
+        if (activeDbInfo && activeDbInfo.connected && activeDbInfo.engine === 'mysql') {
           dbBadge.style.background = '#ecfdf5';
           dbBadge.style.color = '#047857';
           dbBadge.style.borderColor = '#a7f3d0';
-          dbBadge.innerHTML = `🗄️ MySQL: <b>Terhubung</b> (${info.database.database})`;
+          dbBadge.innerHTML = `🗄️ MySQL: <b>Aktif</b> (${activeDbInfo.database})`;
         } else {
           dbBadge.style.background = '#fef3c7';
           dbBadge.style.color = '#92400e';
           dbBadge.style.borderColor = '#fde68a';
-          dbBadge.innerHTML = `📁 Database: <b>File JSON</b>`;
+          dbBadge.innerHTML = `📁 Storage: <b>File JSON (${currentDb})</b>`;
         }
       }
     } else if (dbBadge) {
       dbBadge.style.background = '#f1f5f9';
       dbBadge.style.color = '#64748b';
-      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline</b>`;
+      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline (${currentDb})</b>`;
     }
   } catch (e) {
     if (dbBadge) {
       dbBadge.style.background = '#f1f5f9';
       dbBadge.style.color = '#64748b';
-      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline</b>`;
+      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline (${currentDb})</b>`;
     }
   }
 }
 
 async function saveData(isManual = false) {
   updateSaveStatus('saving');
-  // Selalu simpan ke localStorage offline
+  // Selalu simpan ke localStorage offline untuk database aktif
   try {
-    localStorage.setItem('laporan_service_web_backup', JSON.stringify(data));
+    localStorage.setItem(`laporan_service_web_backup_${currentDb}`, JSON.stringify(data));
   } catch (e) {}
 
   let serverSaved = false;
   try {
-    const res = await fetch('/api/save-data', {
+    const res = await fetch(`/api/save-data?db=${currentDb}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(data)
+      headers: { 
+        'Content-Type': 'application/json',
+        'X-Database': currentDb
+      },
+      body: JSON.stringify({ ...data, db: currentDb })
     });
     if (res.ok) {
       const json = await res.json();
       if (json && json.success) serverSaved = true;
     }
   } catch (err) {
+    console.warn(`Gagal sinkron ke server API [${currentDb}], tersimpan di browser storage saja:`, err);
+  }
+
+  updateSaveStatus('saved');
+  if (isManual) {
+    showToast(`✓ Data Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'} berhasil disimpan!`, 'success');
+  }
+}
     console.warn('Gagal sinkron ke server API, tersimpan di browser storage saja:', err);
   }
 
@@ -1696,7 +1775,8 @@ function populateExportBulanDropdown() {
 function onExportBulanChange() {
   const titleEl = document.getElementById('exportTitle');
   if (titleEl) {
-    titleEl.value = 'Laporan Service Bulanan Sistem Android';
+    const isHardware = currentDb === 'hardware';
+    titleEl.value = `Laporan Service Bulanan Sistem Android - ${isHardware ? 'Hardware' : 'Casing'}`;
   }
 }
 
@@ -2083,7 +2163,8 @@ async function confirmExportToExcel() {
 
   const selectedMonth = document.getElementById('exportPeriodeBulan') ? document.getElementById('exportPeriodeBulan').value : 'all';
 
-  let suggestedFilename = 'Laporan_Service.xlsx';
+  const dbTag = currentDb === 'casing' ? 'Casing' : 'Hardware';
+  let suggestedFilename = `Laporan_Service_${dbTag}.xlsx`;
   const monthsIndo = [
     'Januari','Februari','Maret','April','Mei','Juni',
     'Juli','Agustus','September','Oktober','November','Desember'
@@ -2093,10 +2174,10 @@ async function confirmExportToExcel() {
     const parts = selectedMonth.split('-');
     const blnIdx = parseInt(parts[1], 10) - 1;
     const labelBulan = monthsIndo[blnIdx];
-    suggestedFilename = `Laporan_Service_${labelBulan}_${parts[0]}.xlsx`;
+    suggestedFilename = `Laporan_Service_${dbTag}_${labelBulan}_${parts[0]}.xlsx`;
   } else {
     const now = new Date();
-    suggestedFilename = `Laporan_Service_Semua_Bulan_${now.getFullYear()}.xlsx`;
+    suggestedFilename = `Laporan_Service_${dbTag}_Semua_Bulan_${now.getFullYear()}.xlsx`;
   }
 
   closeExportModal();
