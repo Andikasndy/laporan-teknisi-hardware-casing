@@ -53,17 +53,11 @@ let dayCheckInterval = null;
 let isSavingLaporan = false;
 let pendingAvatarData = null;
 
-function updateDatabaseSwitcherUI() {
-  const selector = document.getElementById('dbSelector');
-  if (selector) selector.value = currentDb;
-
-  const loginDbSel = document.getElementById('loginDatabase');
-  if (loginDbSel) loginDbSel.value = currentDb;
-
+function updateDatabaseBadgeUI() {
   const dbBadge = document.getElementById('dbStatusBadge');
   if (dbBadge) {
     const isHardware = currentDb === 'hardware';
-    dbBadge.innerHTML = `🗄️ Database: <b style="color: ${isHardware ? '#1d4ed8' : '#059669'};">${isHardware ? 'Hardware' : 'Casing'}</b>`;
+    dbBadge.innerHTML = `🗄️ Database: <b style="color: ${isHardware ? '#1d4ed8' : '#059669'};">${isHardware ? 'Teknisi Hardware' : 'Teknisi Casing'}</b>`;
     dbBadge.style.background = isHardware ? '#eff6ff' : '#ecfdf5';
     dbBadge.style.borderColor = isHardware ? '#bfdbfe' : '#a7f3d0';
     dbBadge.style.color = isHardware ? '#1e40af' : '#065f46';
@@ -74,25 +68,6 @@ function updateDatabaseSwitcherUI() {
     const isHardware = currentDb === 'hardware';
     titleHeader.innerHTML = `Dashboard Laporan Service <span style="font-size: 14px; font-weight: 600; padding: 2px 10px; border-radius: 9999px; background: ${isHardware ? '#dbeafe' : '#d1fae5'}; color: ${isHardware ? '#1e40af' : '#065f46'}; vertical-align: middle;">Bagian ${isHardware ? 'Hardware' : 'Casing'}</span>`;
   }
-}
-
-function handleLoginDatabaseChange(val) {
-  currentDb = val === 'casing' ? 'casing' : 'hardware';
-  try { localStorage.setItem('active_database', currentDb); } catch (e) {}
-  const unameInput = document.getElementById('loginUsername');
-  if (unameInput && (!unameInput.value || unameInput.value === 'hardware' || unameInput.value === 'casing')) {
-    unameInput.value = currentDb;
-  }
-}
-
-async function switchDatabase(targetDb) {
-  const key = targetDb === 'casing' ? 'casing' : 'hardware';
-  if (key === currentDb && data.laporan) return;
-  currentDb = key;
-  try { localStorage.setItem('active_database', currentDb); } catch (e) {}
-  showToast(`🔄 Beralih ke Database Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'}...`, 'info');
-  await loadData(currentDb);
-  showToast(`✓ Aktif di Database: Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'}`, 'success');
 }
 
 // Filter state
@@ -200,6 +175,9 @@ function checkAuth() {
         role: validUser.role || 'Teknisi Service',
         avatar: validUser.avatar || ''
       };
+      // Sinkronkan database secara otomatis sesuai akun yang login
+      currentDb = currentUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+      localStorage.setItem('active_database', currentDb);
       showAppScreen();
       startDayChangeWatcher();
       return;
@@ -235,7 +213,7 @@ function showAppScreen() {
   if (appScreen) appScreen.style.display = 'block';
 
   updateSidebarProfile();
-  updateDatabaseSwitcherUI();
+  updateDatabaseBadgeUI();
   showTab('dashboard');
   renderDashboard();
 }
@@ -263,17 +241,8 @@ function handleLoginSubmit(event) {
       avatar: matchedUser.avatar || ''
     };
 
-    // Tentukan database aktif berdasarkan username login atau pilihan database
-    if (matchedUser.username.toLowerCase() === 'casing') {
-      currentDb = 'casing';
-    } else if (matchedUser.username.toLowerCase() === 'hardware') {
-      currentDb = 'hardware';
-    } else {
-      const loginDbEl = document.getElementById('loginDatabase');
-      if (loginDbEl && loginDbEl.value) {
-        currentDb = loginDbEl.value;
-      }
-    }
+    // Otomatis hubungkan ke database masing-masing sesuai user yang login
+    currentDb = matchedUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
     localStorage.setItem('active_database', currentDb);
     localStorage.setItem('auth_user', JSON.stringify(currentUser));
     localStorage.setItem('auth_login_date', getTodayDateString());
@@ -283,7 +252,7 @@ function handleLoginSubmit(event) {
     loadData(currentDb).then(() => {
       showAppScreen();
       startDayChangeWatcher();
-      showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Database: ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
+      showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Terhubung otomatis ke Database ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
     });
   } else {
     if (errEl) {
@@ -394,10 +363,19 @@ function updateSaveStatus(status) {
 async function loadData(targetDb = null) {
   if (targetDb) {
     currentDb = targetDb === 'casing' ? 'casing' : 'hardware';
-    try { localStorage.setItem('active_database', currentDb); } catch (e) {}
+  } else if (currentUser && currentUser.username) {
+    currentDb = currentUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+  } else {
+    try {
+      const savedUser = JSON.parse(localStorage.getItem('auth_user') || 'null');
+      if (savedUser && savedUser.username) {
+        currentDb = savedUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+      }
+    } catch (e) {}
   }
+  try { localStorage.setItem('active_database', currentDb); } catch (e) {}
   updateSaveStatus('saving');
-  updateDatabaseSwitcherUI();
+  updateDatabaseBadgeUI();
   let loadedSuccessfully = false;
 
   // 1. Coba fetch dari server backend Node.js untuk database aktif
@@ -449,7 +427,7 @@ async function loadData(targetDb = null) {
   renderAll();
   checkAuth();
   checkServerInfo();
-  updateDatabaseSwitcherUI();
+  updateDatabaseBadgeUI();
 }
 
 async function checkServerInfo() {
