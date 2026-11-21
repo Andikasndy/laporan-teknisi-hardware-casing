@@ -148,44 +148,10 @@ function startDayChangeWatcher() {
 }
 
 function checkAuth() {
-  const saved = localStorage.getItem('auth_user');
-  if (saved) {
-    try {
-      currentUser = JSON.parse(saved);
-      const loginDate = localStorage.getItem('auth_login_date');
-      const today = getTodayDateString();
-      const userList = Array.isArray(data.users) && data.users.length > 0 ? data.users : DEFAULT_USERS;
-      const validUser = userList.find(u => u.username && currentUser && u.username.toLowerCase() === currentUser.username.toLowerCase());
-      if (!validUser || (loginDate && loginDate !== today)) {
-        localStorage.removeItem('auth_user');
-        localStorage.removeItem('auth_login_date');
-        currentUser = null;
-        showLoginScreen();
-        if (validUser) {
-          showToast('Sesi Anda telah berakhir karena hari berganti. Silakan login kembali.', 'info');
-        } else {
-          showToast('Sesi akun sebelumnya telah kedaluwarsa. Silakan login kembali.', 'info');
-        }
-        return;
-      }
-      currentUser = {
-        id: validUser.id || 1,
-        username: validUser.username,
-        nama: validUser.nama || validUser.username,
-        role: validUser.role || 'Teknisi Service',
-        avatar: validUser.avatar || ''
-      };
-      // Sinkronkan database secara otomatis sesuai akun yang login
-      currentDb = currentUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
-      localStorage.setItem('active_database', currentDb);
-      showAppScreen();
-      startDayChangeWatcher();
-      return;
-    } catch (e) {
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem('auth_login_date');
-    }
-  }
+  // Selalu hapus sesi lama agar tidak auto-login — user harus login manual setiap kali buka halaman
+  localStorage.removeItem('auth_user');
+  localStorage.removeItem('auth_login_date');
+  currentUser = null;
   showLoginScreen();
 }
 
@@ -195,13 +161,15 @@ function showLoginScreen() {
   if (loginScreen) loginScreen.style.display = 'flex';
   if (appScreen) appScreen.style.display = 'none';
 
+  // Kosongkan kedua field agar user harus isi ulang setiap kali
+  const userInput = document.getElementById('loginUsername');
+  if (userInput) userInput.value = '';
   const pwdInput = document.getElementById('loginPassword');
   if (pwdInput) pwdInput.value = '';
   const errEl = document.getElementById('loginError');
   if (errEl) errEl.style.display = 'none';
 
   setTimeout(() => {
-    const userInput = document.getElementById('loginUsername');
     if (userInput) userInput.focus();
   }, 100);
 }
