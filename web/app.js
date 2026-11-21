@@ -248,12 +248,13 @@ function handleLoginSubmit(event) {
     localStorage.setItem('auth_login_date', getTodayDateString());
     if (errEl) errEl.style.display = 'none';
 
-    // Muat data khusus database bagian tersebut
-    loadData(currentDb).then(() => {
-      showAppScreen();
-      startDayChangeWatcher();
-      showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Terhubung otomatis ke Database ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
-    });
+    // Langsung buka dashboard & sinkronkan data database
+    showAppScreen();
+    startDayChangeWatcher();
+    showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Terhubung ke Database ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
+
+    // Muat data spesifik database di background
+    loadData(currentDb, false);
   } else {
     if (errEl) {
       errEl.textContent = 'Username atau Password salah! Periksa kembali.';
@@ -267,10 +268,18 @@ function handleLoginSubmit(event) {
   }
 }
 
-function togglePasswordVisibility() {
-  const pwdInput = document.getElementById('loginPassword');
+function togglePasswordVisibility(targetInputId = 'loginPassword') {
+  const pwdInput = document.getElementById(targetInputId) || document.getElementById('loginPassword');
   if (!pwdInput) return;
-  pwdInput.type = (pwdInput.type === 'password') ? 'text' : 'password';
+  const isPassword = pwdInput.type === 'password';
+  pwdInput.type = isPassword ? 'text' : 'password';
+
+  // Update ikon tombol jika ada
+  const btn = event && event.currentTarget;
+  if (btn) {
+    btn.textContent = isPassword ? '🙈' : '👁️';
+    btn.setAttribute('title', isPassword ? 'Sembunyikan password' : 'Lihat password');
+  }
 }
 
 function logout() {
@@ -360,7 +369,7 @@ function updateSaveStatus(status) {
 // ==========================================
 // PERSISTENSI DATA (SERVER REST API + LOCALSTORAGE FALLBACK)
 // ==========================================
-async function loadData(targetDb = null) {
+async function loadData(targetDb = null, triggerCheckAuth = true) {
   if (targetDb) {
     currentDb = targetDb === 'casing' ? 'casing' : 'hardware';
   } else if (currentUser && currentUser.username) {
@@ -425,7 +434,9 @@ async function loadData(targetDb = null) {
   updateSaveStatus('saved');
   populateFilterDropdowns();
   renderAll();
-  checkAuth();
+  if (triggerCheckAuth) {
+    checkAuth();
+  }
   checkServerInfo();
   updateDatabaseBadgeUI();
 }
@@ -492,14 +503,6 @@ async function saveData(isManual = false) {
   updateSaveStatus('saved');
   if (isManual) {
     showToast(`✓ Data Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'} berhasil disimpan!`, 'success');
-  }
-}
-    console.warn('Gagal sinkron ke server API, tersimpan di browser storage saja:', err);
-  }
-
-  updateSaveStatus('saved');
-  if (isManual) {
-    showToast('✓ Data berhasil disimpan!', 'success');
   }
 }
 
