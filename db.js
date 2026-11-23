@@ -1,6 +1,11 @@
 // ==============================================================
 // MYSQL DATABASE CONNECTOR & ORM (MULTI-DATABASE: HARDWARE & CASING)
-// Mendukung MySQL 5.7+, 8.0+, MariaDB 10.3+
+// Mendukung 5 Database Terpisah:
+// 1. hardware_hp     : Service HP, PC & Tab
+// 2. hardware_alat   : Service Alat Lain
+// 3. hardware_rusak  : Data Barang Rusak
+// 4. casing_admin    : Dari Admin Stock
+// 5. casing_paket    : Dari Paket
 // Otomatis membuat database, migrate table, auto-seed data, & auto-fallback
 // ==============================================================
 
@@ -12,6 +17,17 @@ try {
   mysql = require('mysql2/promise');
 } catch (e) {
   console.warn('⚠️ Modul mysql2 belum tersedia. Pastikan menjalankan "npm install mysql2".');
+}
+
+const DB_KEYS = ['hardware_hp', 'hardware_alat', 'hardware_rusak', 'casing_admin', 'casing_paket'];
+
+// Normalisasi target database key
+function normalizeDbKey(key) {
+  const k = String(key || '').toLowerCase().trim();
+  if (k === 'hardware') return 'hardware_hp';
+  if (k === 'casing') return 'casing_admin';
+  if (DB_KEYS.includes(k)) return k;
+  return 'hardware_hp';
 }
 
 // Baca konfigurasi dari config.json atau Environment Variables
@@ -37,9 +53,13 @@ function getDbConfig() {
     charset: 'utf8mb4'
   };
 
+  const fileDbs = fileConfig.databases || {};
   const databases = {
-    hardware: process.env.DB_NAME_HARDWARE || (fileConfig.databases && fileConfig.databases.hardware) || 'laporan_service_hardware',
-    casing: process.env.DB_NAME_CASING || (fileConfig.databases && fileConfig.databases.casing) || 'laporan_service_casing'
+    hardware_hp: process.env.DB_HARDWARE_HP || fileDbs.hardware_hp || 'laporan_hardware_hp',
+    hardware_alat: process.env.DB_HARDWARE_ALAT || fileDbs.hardware_alat || 'laporan_hardware_alat',
+    hardware_rusak: process.env.DB_HARDWARE_RUSAK || fileDbs.hardware_rusak || 'laporan_hardware_rusak',
+    casing_admin: process.env.DB_CASING_ADMIN || fileDbs.casing_admin || 'laporan_casing_admin',
+    casing_paket: process.env.DB_CASING_PAKET || fileDbs.casing_paket || 'laporan_casing_paket'
   };
 
   return {
@@ -49,17 +69,14 @@ function getDbConfig() {
 }
 
 const pools = {};
-const connectionStatus = {
-  hardware: false,
-  casing: false
-};
+const connectionStatus = {};
+DB_KEYS.forEach(k => { connectionStatus[k] = false; });
 
-// Inisialisasi pool dan database untuk masing-masing bagian (hardware & casing)
+// Inisialisasi pool dan database untuk seluruh landing page
 async function initDatabase(initialDataMap = {}) {
   if (!mysql) return false;
 
   const config = getDbConfig();
-  const dbKeys = ['hardware', 'casing'];
 
   // 1. Coba koneksi ke server MySQL tanpa memilih database terlebih dahulu
   let tempConn = null;
@@ -71,25 +88,24 @@ async function initDatabase(initialDataMap = {}) {
       port: config.port
     });
 
-    // Buat masing-masing database jika belum ada
-    for (const key of dbKeys) {
+    // Buat seluruh 5 database jika belum ada
+    for (const key of DB_KEYS) {
       const dbName = config.databases[key];
       await tempConn.query(`CREATE DATABASE IF NOT EXISTS \`${dbName}\` DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;`);
     }
     await tempConn.end();
     tempConn = null;
   } catch (err) {
-    console.warn(`⚠️ Gagal menghubungkan ke MySQL (${err.message}). Menggunakan penyimpanan file JSON.`);
+    console.warn(`⚠️ MySQL tidak aktif (${err.message}). Sistem menggunakan penyimpanan file JSON otomatis.`);
     if (tempConn) {
       try { await tempConn.end(); } catch (e) {}
     }
-    connectionStatus.hardware = false;
-    connectionStatus.casing = false;
+    DB_KEYS.forEach(k => { connectionStatus[k] = false; });
     return false;
   }
 
-  // 2. Inisialisasi pool & tabel untuk setiap database (hardware & casing)
-  for (const key of dbKeys) {
+  // 2. Inisialisasi pool & tabel untuk setiap database
+  for (const key of DB_KEYS) {
     const dbName = config.databases[key];
     try {
       const pool = mysql.createPool({
@@ -169,12 +185,12 @@ async function initDatabase(initialDataMap = {}) {
       const [userRows] = await pool.query('SELECT COUNT(*) as cnt FROM users');
       const targetInitial = initialDataMap[key] || initialDataMap['default'];
       if (userRows[0].cnt === 0 && targetInitial) {
-        console.log(`📦 Memigrasikan data awal dari JSON ke database MySQL [${dbName}]...`);
+        console.log(`📦 Memigrasikan data awal ke database MySQL [${dbName}]...`);
         await saveDataToDb(targetInitial, key);
-        console.log(`✓ Migrasi awal ke database [${dbName}] berhasil!`);
+        console.log(`✓ Inisialisasi awal ke database [${dbName}] berhasil!`);
       }
 
-      console.log(`✓ Terhubung ke database MySQL: [${dbName}] (${key}) di ${config.host}:${config.port}`);
+      console.log(`✓ Terhubung ke database MySQL: [${dbName}] (${key})`);
     } catch (err) {
       console.warn(`⚠️ Gagal menginisialisasi database [${dbName}]: ${err.message}`);
       connectionStatus[key] = false;
@@ -182,16 +198,11 @@ async function initDatabase(initialDataMap = {}) {
     }
   }
 
-  return connectionStatus.hardware || connectionStatus.casing;
-}
-
-// Normalisasi target database key ('hardware' atau 'casing')
-function normalizeDbKey(key) {
-  return String(key || '').toLowerCase() === 'casing' ? 'casing' : 'hardware';
+  return Object.values(connectionStatus).some(Boolean);
 }
 
 // Ambil seluruh data dari MySQL berdasarkan target database
-async function getDataFromDb(targetDb = 'hardware') {
+async function getDataFromDb(targetDb = 'hardware_hp') {
   const key = normalizeDbKey(targetDb);
   const pool = pools[key];
   if (!connectionStatus[key] || !pool) return null;
@@ -215,7 +226,7 @@ async function getDataFromDb(targetDb = 'hardware') {
 }
 
 // Simpan data ke MySQL menggunakan transaksi berdasarkan target database
-async function saveDataToDb(data, targetDb = 'hardware') {
+async function saveDataToDb(data, targetDb = 'hardware_hp') {
   const key = normalizeDbKey(targetDb);
   const pool = pools[key];
   if (!connectionStatus[key] || !pool) return false;
@@ -230,12 +241,12 @@ async function saveDataToDb(data, targetDb = 'hardware') {
       for (const u of data.users) {
         await conn.query(
           'INSERT INTO users (id, username, password, nama, role, avatar) VALUES (?, ?, ?, ?, ?, ?)',
-          [u.id || 1, u.username || 'admin', u.password || '', u.nama || '', u.role || 'Admin', u.avatar || null]
+          [u.id || 1, u.username || 'hardware', u.password || '', u.nama || '', u.role || 'Teknisi', u.avatar || null]
         );
       }
     }
 
-    // 2. Simpan Jenis Alat
+    // 2. Simpan Jenis Alat / Kategori
     if (Array.isArray(data.jenisAlat)) {
       await conn.query('DELETE FROM jenis_alat');
       const seenIds = new Set();
@@ -325,24 +336,27 @@ function getDatabaseStatus(targetDb = null) {
     };
   }
 
-  const anyConnected = connectionStatus.hardware || connectionStatus.casing;
+  const anyConnected = Object.values(connectionStatus).some(Boolean);
+  const statusMap = {};
+  DB_KEYS.forEach(k => {
+    statusMap[k] = {
+      connected: !!connectionStatus[k],
+      database: config.databases[k]
+    };
+  });
+
   return {
     engine: anyConnected ? 'mysql' : 'json',
     connected: anyConnected,
     host: config.host,
     port: config.port,
-    hardware: {
-      connected: !!connectionStatus.hardware,
-      database: config.databases.hardware
-    },
-    casing: {
-      connected: !!connectionStatus.casing,
-      database: config.databases.casing
-    }
+    databases: statusMap
   };
 }
 
 module.exports = {
+  DB_KEYS,
+  normalizeDbKey,
   initDatabase,
   getDataFromDb,
   saveDataToDb,

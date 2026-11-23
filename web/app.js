@@ -44,7 +44,7 @@ const INITIAL_DATA = {
 };
 
 let data = { ...INITIAL_DATA };
-let currentDb = localStorage.getItem('active_database') || 'hardware';
+let currentDb = 'hardware_hp';
 let currentUser = null;
 let editingLaporanId = null;
 let editingJenisAlatId = null;
@@ -53,20 +53,257 @@ let dayCheckInterval = null;
 let isSavingLaporan = false;
 let pendingAvatarData = null;
 
+// ==========================================
+// KONFIGURASI MULTI-LANDING PAGE & MULTI-DATABASE
+// ==========================================
+const LANDING_CONFIGS = {
+  hardware: [
+    {
+      id: 'hardware_hp',
+      title: 'Service HP, PC & Tab',
+      shortTitle: 'HP, PC & Tab',
+      icon: '📱💻',
+      badge: 'HP & PC',
+      itemNoun: 'Alat',
+      reportNoun: 'Laporan Service HP, PC & Tab',
+      desc: 'Sistem laporan service handphone, PC, dan tablet',
+      keteranganLabel: 'Keterangan / Jenis Perbaikan',
+      jenisLabel: 'Jenis Alat',
+      kondisiLabel: 'Lama / Baru'
+    },
+    {
+      id: 'hardware_alat',
+      title: 'Service Alat Lain',
+      shortTitle: 'Alat Lain',
+      icon: '🔌',
+      badge: 'Alat Lain',
+      itemNoun: 'Peralatan',
+      reportNoun: 'Laporan Service Alat Lain',
+      desc: 'Sistem laporan service perangkat dan peralatan lainnya',
+      keteranganLabel: 'Keterangan / Jenis Perbaikan',
+      jenisLabel: 'Jenis Alat / Perangkat',
+      kondisiLabel: 'Lama / Baru'
+    },
+    {
+      id: 'hardware_rusak',
+      title: 'Data Barang Rusak',
+      shortTitle: 'Barang Rusak',
+      icon: '⚠️',
+      badge: 'Barang Rusak',
+      itemNoun: 'Barang Rusak',
+      reportNoun: 'Data Barang Rusak',
+      desc: 'Pencatatan data barang rusak, afkir, retur, dan kanibal',
+      keteranganLabel: 'Keterangan Kerusakan / Alasan Rusak',
+      jenisLabel: 'Nama / Jenis Barang Rusak',
+      kondisiLabel: 'Kondisi Kerusakan'
+    }
+  ],
+  casing: [
+    {
+      id: 'casing_admin',
+      title: 'Dari Admin Stock',
+      shortTitle: 'Admin Stock',
+      icon: '📦',
+      badge: 'Admin Stock',
+      itemNoun: 'Casing',
+      reportNoun: 'Laporan Casing - Dari Admin Stock',
+      desc: 'Sistem laporan perbaikan casing masuk dari admin stock',
+      keteranganLabel: 'Keterangan / Jenis Perbaikan Casing',
+      jenisLabel: 'Jenis Casing / Part',
+      kondisiLabel: 'Lama / Baru'
+    },
+    {
+      id: 'casing_paket',
+      title: 'Dari Paket',
+      shortTitle: 'Dari Paket',
+      icon: '📮',
+      badge: 'Dari Paket',
+      itemNoun: 'Casing',
+      reportNoun: 'Laporan Casing - Dari Paket',
+      desc: 'Sistem laporan perbaikan casing masuk dari kiriman paket',
+      keteranganLabel: 'Keterangan / Jenis Perbaikan Casing',
+      jenisLabel: 'Jenis Casing / Kiriman',
+      kondisiLabel: 'Lama / Baru'
+    }
+  ]
+};
+
+function getCurrentUserRole() {
+  if (currentUser && currentUser.username) {
+    return currentUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+  }
+  return 'hardware';
+}
+
+function getLandingListForRole(role) {
+  return LANDING_CONFIGS[role] || LANDING_CONFIGS.hardware;
+}
+
+function getCurrentLandingConfig() {
+  const role = getCurrentUserRole();
+  const list = getLandingListForRole(role);
+  const found = list.find(item => item.id === currentDb);
+  return found || list[0];
+}
+
+function renderLandingNavbar() {
+  const container = document.getElementById('landingTabsContainer');
+  if (!container) return;
+  const role = getCurrentUserRole();
+  const list = getLandingListForRole(role);
+
+  container.innerHTML = '';
+  list.forEach(tab => {
+    const isActive = tab.id === currentDb;
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = `landing-tab-btn ${isActive ? 'active' : ''}`;
+    btn.onclick = () => switchLandingPage(tab.id);
+
+    // Dapatkan hitungan laporan untuk badge
+    let count = 0;
+    if (tab.id === currentDb) {
+      count = Array.isArray(data.laporan) ? data.laporan.length : 0;
+    } else {
+      try {
+        const cached = localStorage.getItem(`laporan_service_web_backup_${tab.id}`);
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (Array.isArray(parsed.laporan)) count = parsed.laporan.length;
+        }
+      } catch (e) {}
+    }
+
+    btn.innerHTML = `
+      <span class="landing-tab-icon">${tab.icon}</span>
+      <span>${tab.title}</span>
+      <span class="landing-tab-badge" id="tab-badge-${tab.id}">${count}</span>
+    `;
+    container.appendChild(btn);
+  });
+
+  const sectionBadge = document.getElementById('currentSectionTitle');
+  if (sectionBadge) {
+    const activeCfg = getCurrentLandingConfig();
+    sectionBadge.textContent = activeCfg.title;
+  }
+}
+
+async function switchLandingPage(targetDbKey) {
+  if (currentDb === targetDbKey) return;
+  const role = getCurrentUserRole();
+  const list = getLandingListForRole(role);
+  const targetConfig = list.find(t => t.id === targetDbKey);
+  if (!targetConfig) return;
+
+  // Simpan data aktif saat ini sebelum beralih
+  await saveData(false);
+
+  currentDb = targetDbKey;
+  localStorage.setItem('active_database', currentDb);
+  localStorage.setItem(`active_landing_${role}`, currentDb);
+
+  // Muat data untuk database baru
+  await loadData(currentDb, false);
+
+  // Update UI navbar dan landing context
+  renderLandingNavbar();
+  applyLandingPageContext(targetConfig);
+  showToast(`✓ Beralih ke bagian: ${targetConfig.title}`, 'info');
+}
+
+function applyLandingPageContext(cfg) {
+  if (!cfg) cfg = getCurrentLandingConfig();
+  const role = getCurrentUserRole();
+  const isRusak = cfg.id === 'hardware_rusak';
+
+  // 1. Dashboard Heading
+  const dTitle = document.getElementById('dashboardLandingTitle');
+  if (dTitle) dTitle.textContent = isRusak ? 'Data Barang Rusak' : `Dashboard ${cfg.title}`;
+  const dSub = document.getElementById('dashboardLandingSubtitle');
+  if (dSub) dSub.textContent = cfg.desc;
+
+  // 2. Stat Card Labels
+  const stat1 = document.getElementById('statCard1Label');
+  if (stat1) stat1.textContent = isRusak ? 'TOTAL BARANG RUSAK' : (role === 'casing' ? 'TOTAL CASING' : 'TOTAL LAPORAN');
+  const stat2 = document.getElementById('statCard2Label');
+  if (stat2) stat2.textContent = isRusak ? 'TOTAL UNIT RUSAK' : 'TOTAL UNIT ALAT';
+  const stat3 = document.getElementById('statCard3Label');
+  if (stat3) stat3.textContent = isRusak ? 'SELESAI / DIPROSES' : 'SELESAI';
+  const stat4 = document.getElementById('statCard4Label');
+  if (stat4) stat4.textContent = isRusak ? 'BELUM DIPROSES' : 'BELUM SELESAI';
+
+  // 3. Navigation Text in Sidebar
+  const navLap = document.getElementById('navLaporanText');
+  if (navLap) navLap.textContent = isRusak ? 'Data Barang Rusak' : 'Data Laporan';
+  const navMas = document.getElementById('navMasterText');
+  if (navMas) navMas.textContent = isRusak ? 'Kategori Barang' : 'Data Kategori';
+
+  // 4. Page Laporan Bar
+  const pTitle = document.getElementById('pageLaporanTitle');
+  if (pTitle) pTitle.textContent = isRusak ? 'Tabel Data Barang Rusak' : `Tabel ${cfg.title}`;
+  const pDesc = document.getElementById('pageLaporanDesc');
+  if (pDesc) pDesc.textContent = cfg.desc;
+  const btnAddMain = document.getElementById('btnTambahLaporanMain');
+  if (btnAddMain) btnAddMain.textContent = `+ Tambah ${cfg.itemNoun}`;
+  const quickLabel = document.getElementById('sidebarQuickAddLabel');
+  if (quickLabel) quickLabel.textContent = `Tambah ${cfg.itemNoun}`;
+
+  // 5. Table Headers
+  const thKet = document.getElementById('thTableKeterangan');
+  if (thKet) thKet.textContent = cfg.keteranganLabel;
+  const thJen = document.getElementById('thTableJenis');
+  if (thJen) thJen.textContent = cfg.jenisLabel;
+  const thKon = document.getElementById('thTableKondisi');
+  if (thKon) thKon.textContent = cfg.kondisiLabel;
+
+  const thRecKet = document.getElementById('thRecentKeterangan');
+  if (thRecKet) thRecKet.textContent = cfg.keteranganLabel;
+  const thRecJen = document.getElementById('thRecentJenis');
+  if (thRecJen) thRecJen.textContent = cfg.jenisLabel;
+
+  // 6. Kategori Master Labels
+  const pillAlat = document.getElementById('pillKategoriAlatText');
+  if (pillAlat) pillAlat.textContent = isRusak ? '⚠️ Kategori Barang Rusak' : (role === 'casing' ? '📦 Kategori Casing' : '🔧 Kategori Alat');
+  const cardTitleJenis = document.getElementById('cardTitleJenisAlat');
+  if (cardTitleJenis) cardTitleJenis.textContent = isRusak ? 'Daftar Kategori Barang Rusak' : `Daftar Kategori ${cfg.itemNoun}`;
+  const thMasterNama = document.getElementById('thMasterNamaAlat');
+  if (thMasterNama) thMasterNama.textContent = `NAMA ${cfg.jenisLabel.toUpperCase()}`;
+  const btnAddJenis = document.getElementById('btnTambahJenisAlat');
+  if (btnAddJenis) btnAddJenis.textContent = `+ Tambah ${cfg.itemNoun}`;
+
+  // 7. Modal Laporan Labels
+  const mTitle = document.getElementById('modalLaporanTitle');
+  if (mTitle && !editingLaporanId) mTitle.textContent = `Tambah ${cfg.reportNoun}`;
+  const lblJenis = document.getElementById('lblModalJenisAlat');
+  if (lblJenis) lblJenis.textContent = `${cfg.jenisLabel} *`;
+  const lblKet = document.getElementById('lblModalKeterangan');
+  if (lblKet) lblKet.textContent = `${cfg.keteranganLabel} *`;
+  const lblKon = document.getElementById('lblModalKondisi');
+  if (lblKon) lblKon.textContent = `${cfg.kondisiLabel}`;
+  const lblJenisNama = document.getElementById('lblModalJenisAlatNama');
+  if (lblJenisNama) lblJenisNama.textContent = `Nama ${cfg.jenisLabel} *`;
+  const mJenisTitle = document.getElementById('modalJenisAlatTitle');
+  if (mJenisTitle && !editingJenisAlatId) mJenisTitle.textContent = `Tambah Kategori ${cfg.itemNoun}`;
+
+  // 8. Bulanan & Export
+  const tabBul = document.getElementById('tabBulananJudul');
+  if (tabBul) tabBul.textContent = `Rekap Bulanan - ${cfg.title}`;
+  const expTitle = document.getElementById('exportTitle');
+  if (expTitle) expTitle.value = `Laporan ${cfg.title} Bulanan`;
+
+  // 9. Mobile Title & Sidebar Badge
+  const mobTitle = document.getElementById('mobileTitle');
+  if (mobTitle) mobTitle.textContent = cfg.shortTitle;
+  const sBadge = document.getElementById('sidebarRoleBadge');
+  if (sBadge) sBadge.textContent = role === 'casing' ? 'CASING' : 'HARDWARE';
+}
+
 function updateDatabaseBadgeUI() {
   const dbBadge = document.getElementById('dbStatusBadge');
+  const activeCfg = getCurrentLandingConfig();
   if (dbBadge) {
-    const isHardware = currentDb === 'hardware';
-    dbBadge.innerHTML = `🗄️ Database: <b style="color: ${isHardware ? '#1d4ed8' : '#059669'};">${isHardware ? 'Teknisi Hardware' : 'Teknisi Casing'}</b>`;
-    dbBadge.style.background = isHardware ? '#eff6ff' : '#ecfdf5';
-    dbBadge.style.borderColor = isHardware ? '#bfdbfe' : '#a7f3d0';
-    dbBadge.style.color = isHardware ? '#1e40af' : '#065f46';
-  }
-
-  const titleHeader = document.querySelector('.dashboard-title');
-  if (titleHeader) {
-    const isHardware = currentDb === 'hardware';
-    titleHeader.innerHTML = `Dashboard Laporan Service <span style="font-size: 14px; font-weight: 600; padding: 2px 10px; border-radius: 9999px; background: ${isHardware ? '#dbeafe' : '#d1fae5'}; color: ${isHardware ? '#1e40af' : '#065f46'}; vertical-align: middle;">Bagian ${isHardware ? 'Hardware' : 'Casing'}</span>`;
+    dbBadge.innerHTML = `🗄️ Database: <b>${activeCfg.title}</b>`;
   }
 }
 
@@ -181,6 +418,8 @@ function showAppScreen() {
   if (appScreen) appScreen.style.display = 'block';
 
   updateSidebarProfile();
+  renderLandingNavbar();
+  applyLandingPageContext(getCurrentLandingConfig());
   updateDatabaseBadgeUI();
   showTab('dashboard');
   renderDashboard();
@@ -201,25 +440,31 @@ function handleLoginSubmit(event) {
   );
 
   if (matchedUser) {
+    const isCasing = matchedUser.username.toLowerCase() === 'casing';
+    const roleKey = isCasing ? 'casing' : 'hardware';
+
     currentUser = {
       id: matchedUser.id || 1,
       username: matchedUser.username,
-      nama: matchedUser.nama || matchedUser.username,
-      role: matchedUser.role || 'Teknisi Service',
+      nama: matchedUser.nama || (isCasing ? 'Teknisi Casing' : 'Teknisi Hardware'),
+      role: matchedUser.role || (isCasing ? 'Teknisi Casing' : 'Teknisi Hardware'),
       avatar: matchedUser.avatar || ''
     };
 
-    // Otomatis hubungkan ke database masing-masing sesuai user yang login
-    currentDb = matchedUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+    // Tentukan database landing page default sesuai user yang login
+    const savedLanding = localStorage.getItem(`active_landing_${roleKey}`);
+    const validLandings = LANDING_CONFIGS[roleKey].map(l => l.id);
+    currentDb = validLandings.includes(savedLanding) ? savedLanding : validLandings[0];
+
     localStorage.setItem('active_database', currentDb);
     localStorage.setItem('auth_user', JSON.stringify(currentUser));
     localStorage.setItem('auth_login_date', getTodayDateString());
     if (errEl) errEl.style.display = 'none';
 
-    // Langsung buka dashboard & sinkronkan data database
+    // Buka aplikasi utama
     showAppScreen();
     startDayChangeWatcher();
-    showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Terhubung ke Database ${currentDb === 'casing' ? 'Teknisi Casing' : 'Teknisi Hardware'}`, 'success');
+    showToast(`✓ Selamat datang, ${currentUser.nama || currentUser.username}! Terhubung ke ${getCurrentLandingConfig().title}`, 'success');
 
     // Muat data spesifik database di background
     loadData(currentDb, false);
@@ -339,17 +584,18 @@ function updateSaveStatus(status) {
 // ==========================================
 async function loadData(targetDb = null, triggerCheckAuth = true) {
   if (targetDb) {
-    currentDb = targetDb === 'casing' ? 'casing' : 'hardware';
-  } else if (currentUser && currentUser.username) {
-    currentDb = currentUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
+    currentDb = targetDb;
   } else {
-    try {
-      const savedUser = JSON.parse(localStorage.getItem('auth_user') || 'null');
-      if (savedUser && savedUser.username) {
-        currentDb = savedUser.username.toLowerCase() === 'casing' ? 'casing' : 'hardware';
-      }
-    } catch (e) {}
+    const role = getCurrentUserRole();
+    const savedLanding = localStorage.getItem(`active_landing_${role}`);
+    const validLandings = LANDING_CONFIGS[role].map(l => l.id);
+    currentDb = validLandings.includes(savedLanding) ? savedLanding : (currentDb || validLandings[0]);
   }
+
+  // Normalisasi alias lama jika ada
+  if (currentDb === 'hardware') currentDb = 'hardware_hp';
+  if (currentDb === 'casing') currentDb = 'casing_admin';
+
   try { localStorage.setItem('active_database', currentDb); } catch (e) {}
   updateSaveStatus('saving');
   updateDatabaseBadgeUI();
@@ -402,11 +648,19 @@ async function loadData(targetDb = null, triggerCheckAuth = true) {
   updateSaveStatus('saved');
   populateFilterDropdowns();
   renderAll();
+  renderLandingNavbar();
+  applyLandingPageContext(getCurrentLandingConfig());
   if (triggerCheckAuth) {
     checkAuth();
   }
   checkServerInfo();
   updateDatabaseBadgeUI();
+
+  // Update badge count aktif
+  const tabBadge = document.getElementById(`tab-badge-${currentDb}`);
+  if (tabBadge && Array.isArray(data.laporan)) {
+    tabBadge.textContent = data.laporan.length;
+  }
 }
 
 async function checkServerInfo() {
@@ -417,28 +671,31 @@ async function checkServerInfo() {
       const info = await res.json();
       if (dbBadge && info && info.databases) {
         const activeDbInfo = info.databases[currentDb];
+        const activeCfg = getCurrentLandingConfig();
         if (activeDbInfo && activeDbInfo.connected && activeDbInfo.engine === 'mysql') {
           dbBadge.style.background = '#ecfdf5';
           dbBadge.style.color = '#047857';
           dbBadge.style.borderColor = '#a7f3d0';
-          dbBadge.innerHTML = `🗄️ MySQL: <b>Aktif</b> (${activeDbInfo.database})`;
+          dbBadge.innerHTML = `🗄️ MySQL: <b>${activeCfg.title}</b> (${activeDbInfo.database})`;
         } else {
-          dbBadge.style.background = '#fef3c7';
-          dbBadge.style.color = '#92400e';
-          dbBadge.style.borderColor = '#fde68a';
-          dbBadge.innerHTML = `📁 Storage: <b>File JSON (${currentDb})</b>`;
+          dbBadge.style.background = '#f0fdf4';
+          dbBadge.style.color = '#166534';
+          dbBadge.style.borderColor = '#bbf7d0';
+          dbBadge.innerHTML = `📁 Storage: <b>${activeCfg.title}</b> [JSON: ${currentDb}]`;
         }
       }
     } else if (dbBadge) {
+      const activeCfg = getCurrentLandingConfig();
       dbBadge.style.background = '#f1f5f9';
       dbBadge.style.color = '#64748b';
-      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline (${currentDb})</b>`;
+      dbBadge.innerHTML = `📁 Storage Offline: <b>${activeCfg.title}</b>`;
     }
   } catch (e) {
     if (dbBadge) {
+      const activeCfg = getCurrentLandingConfig();
       dbBadge.style.background = '#f1f5f9';
       dbBadge.style.color = '#64748b';
-      dbBadge.innerHTML = `📁 Storage: <b>Browser Offline (${currentDb})</b>`;
+      dbBadge.innerHTML = `📁 Storage Offline: <b>${activeCfg.title}</b>`;
     }
   }
 }
@@ -469,8 +726,15 @@ async function saveData(isManual = false) {
   }
 
   updateSaveStatus('saved');
+  const activeCfg = getCurrentLandingConfig();
   if (isManual) {
-    showToast(`✓ Data Teknisi ${currentDb === 'casing' ? 'Casing' : 'Hardware'} berhasil disimpan!`, 'success');
+    showToast(`✓ Data "${activeCfg.title}" berhasil disimpan!`, 'success');
+  }
+
+  // Update badge count di landing navbar
+  const tabBadge = document.getElementById(`tab-badge-${currentDb}`);
+  if (tabBadge && Array.isArray(data.laporan)) {
+    tabBadge.textContent = data.laporan.length;
   }
 }
 
@@ -1724,8 +1988,8 @@ function populateExportBulanDropdown() {
 function onExportBulanChange() {
   const titleEl = document.getElementById('exportTitle');
   if (titleEl) {
-    const isHardware = currentDb === 'hardware';
-    titleEl.value = `Laporan Service Bulanan Sistem Android - ${isHardware ? 'Hardware' : 'Casing'}`;
+    const activeCfg = getCurrentLandingConfig();
+    titleEl.value = `Laporan ${activeCfg.title} Bulanan`;
   }
 }
 
@@ -2112,8 +2376,9 @@ async function confirmExportToExcel() {
 
   const selectedMonth = document.getElementById('exportPeriodeBulan') ? document.getElementById('exportPeriodeBulan').value : 'all';
 
-  const dbTag = currentDb === 'casing' ? 'Casing' : 'Hardware';
-  let suggestedFilename = `Laporan_Service_${dbTag}.xlsx`;
+  const activeCfg = getCurrentLandingConfig();
+  const dbTag = (activeCfg.shortTitle || activeCfg.title).replace(/[^a-zA-Z0-9]/g, '_');
+  let suggestedFilename = `Laporan_${dbTag}.xlsx`;
   const monthsIndo = [
     'Januari','Februari','Maret','April','Mei','Juni',
     'Juli','Agustus','September','Oktober','November','Desember'
@@ -2123,10 +2388,10 @@ async function confirmExportToExcel() {
     const parts = selectedMonth.split('-');
     const blnIdx = parseInt(parts[1], 10) - 1;
     const labelBulan = monthsIndo[blnIdx];
-    suggestedFilename = `Laporan_Service_${dbTag}_${labelBulan}_${parts[0]}.xlsx`;
+    suggestedFilename = `Laporan_${dbTag}_${labelBulan}_${parts[0]}.xlsx`;
   } else {
     const now = new Date();
-    suggestedFilename = `Laporan_Service_${dbTag}_Semua_Bulan_${now.getFullYear()}.xlsx`;
+    suggestedFilename = `Laporan_${dbTag}_Semua_Bulan_${now.getFullYear()}.xlsx`;
   }
 
   closeExportModal();

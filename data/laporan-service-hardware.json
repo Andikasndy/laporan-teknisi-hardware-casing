@@ -641,5 +641,33 @@
       "nama": "Teknisi Limin"
     }
   ],
-  "laporan": []
+  "laporan": [
+    {
+      "id": 1795284244079,
+      "no": "1",
+      "tanggalMasuk": "2026-11-21",
+      "tanggalKeluar": "2026-11-23",
+      "jumlahAlat": 1,
+      "keteranganPerbaikan": "baljoo",
+      "jenisAlatId": 1793606472509,
+      "jenisAlatNama": "INF HOT 11 PLAY",
+      "lokasiDari": "Lapas Tabanan",
+      "kondisi": "Lama",
+      "lamaHari": 2
+    },
+    {
+      "id": 1795284290192,
+      "no": "2",
+      "tanggalMasuk": "2026-11-21",
+      "tanggalKeluar": "",
+      "jumlahAlat": 1,
+      "keteranganPerbaikan": "lalala",
+      "jenisAlatId": 1793606472509,
+      "jenisAlatNama": "INF HOT 11 PLAY",
+      "lokasiDari": "Lapas Bogor",
+      "kondisi": "Lama",
+      "lamaHari": 0
+    }
+  ],
+  "db": "hardware"
 }

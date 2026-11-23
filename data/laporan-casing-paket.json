@@ -1,0 +1,59 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "hardware",
+      "password": "hardware123",
+      "nama": "Teknisi Hardware",
+      "role": "Teknisi Hardware"
+    },
+    {
+      "id": 2,
+      "username": "casing",
+      "password": "casing123",
+      "nama": "Teknisi Casing",
+      "role": "Teknisi Casing"
+    }
+  ],
+  "jenisAlat": [
+    {
+      "id": 1,
+      "nama": "Paket Casing Inifinix"
+    },
+    {
+      "id": 2,
+      "nama": "Paket Casing Samsung"
+    },
+    {
+      "id": 3,
+      "nama": "Paket Backdoor"
+    },
+    {
+      "id": 4,
+      "nama": "Paket Frame & Kaca Kamera"
+    },
+    {
+      "id": 5,
+      "nama": "Paket Aksesoris Casing"
+    }
+  ],
+  "kategoriLokasi": [
+    {
+      "id": 1,
+      "nama": "Ekspedisi J&T"
+    },
+    {
+      "id": 2,
+      "nama": "Ekspedisi JNE"
+    },
+    {
+      "id": 3,
+      "nama": "Ekspedisi SiCepat"
+    },
+    {
+      "id": 4,
+      "nama": "Kiriman Vendor / Supplier"
+    }
+  ],
+  "laporan": []
+}

@@ -1,0 +1,67 @@
+{
+  "users": [
+    {
+      "id": 1,
+      "username": "hardware",
+      "password": "hardware123",
+      "nama": "Teknisi Hardware",
+      "role": "Teknisi Hardware"
+    },
+    {
+      "id": 2,
+      "username": "casing",
+      "password": "casing123",
+      "nama": "Teknisi Casing",
+      "role": "Teknisi Casing"
+    }
+  ],
+  "jenisAlat": [
+    {
+      "id": 1,
+      "nama": "Printer Thermal"
+    },
+    {
+      "id": 2,
+      "nama": "Barcode Scanner"
+    },
+    {
+      "id": 3,
+      "nama": "Power Supply / PSU"
+    },
+    {
+      "id": 4,
+      "nama": "Switch / Router Jaringan"
+    },
+    {
+      "id": 5,
+      "nama": "Monitor / Display"
+    },
+    {
+      "id": 6,
+      "nama": "Mesin EDC / POS"
+    },
+    {
+      "id": 7,
+      "nama": "Alat Elektronik Lain"
+    }
+  ],
+  "kategoriLokasi": [
+    {
+      "id": 1,
+      "nama": "Gudang Utama"
+    },
+    {
+      "id": 2,
+      "nama": "Teknisi Limin"
+    },
+    {
+      "id": 3,
+      "nama": "Rutan Bangil"
+    },
+    {
+      "id": 4,
+      "nama": "Salafiyah Sukorejo"
+    }
+  ],
+  "laporan": []
+}
