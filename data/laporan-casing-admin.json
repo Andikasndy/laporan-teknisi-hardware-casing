@@ -641,5 +641,20 @@
       "nama": "Teknisi Limin"
     }
   ],
-  "laporan": []
+  "laporan": [
+    {
+      "id": 1795453700108,
+      "no": "1",
+      "tanggalMasuk": "2026-11-23",
+      "tanggalKeluar": "2026-11-25",
+      "jumlahAlat": 1,
+      "keteranganPerbaikan": "lalala",
+      "jenisAlatId": 1793606472509,
+      "jenisAlatNama": "INF HOT 11 PLAY",
+      "lokasiDari": "Lapas Brebes",
+      "kondisi": "Lama",
+      "lamaHari": 2
+    }
+  ],
+  "db": "casing_admin"
 }

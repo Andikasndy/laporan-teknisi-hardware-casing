@@ -667,6 +667,19 @@
       "lokasiDari": "Lapas Bogor",
       "kondisi": "Lama",
       "lamaHari": 0
+    },
+    {
+      "id": 1795447720786,
+      "no": "3",
+      "tanggalMasuk": "2026-11-23",
+      "tanggalKeluar": "2026-11-25",
+      "jumlahAlat": 4,
+      "keteranganPerbaikan": "bfiyfphp",
+      "jenisAlatId": 1793606512003,
+      "jenisAlatNama": "INF SMART 20",
+      "lokasiDari": "Rutan Surakarta",
+      "kondisi": "Lama",
+      "lamaHari": 2
     }
   ],
   "db": "hardware_hp"
